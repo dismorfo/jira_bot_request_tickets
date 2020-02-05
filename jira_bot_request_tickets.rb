@@ -9,6 +9,7 @@ require 'optimist'
 require 'json'
 require 'digest'
 require 'http'
+require 'mime/types'
 
 # rubocop:disable Metrics/BlockLength
 # rubocop:disable Metrics/MethodLength
@@ -50,6 +51,23 @@ def job_source_entity_available?(content_directory, job)
   true
 end
 
+def string_to_file(string, filename, type = MIME::Types.type_for('json').first.content_type)
+  file = StringIO.new(string)
+
+  file.instance_variable_set(:@path, filename)
+
+  def file.path
+    @path
+  end
+
+  file.instance_variable_set(:@type, type)
+  def file.content_type
+    @type
+  end
+
+  file
+end
+
 def request_tickets(configuration)
   tickets = []
   issues_url = "#{configuration[:jira_endpoint]}/rest/api/2/search?jql=assignee=currentuser()"
@@ -70,7 +88,7 @@ def request_tickets(configuration)
       errors: []
     }
     details['fields']['attachment'].each do |attachment|
-      ticket[:attachments].push(attachment['content']) unless attachment['filename'] == 'job.txt'
+      next unless attachment['filename'] == 'job.txt'
 
       content = HTTP.basic_auth(configuration[:challenge]).get(attachment['content'])
       content.to_s.each_line do |line|
@@ -89,30 +107,43 @@ def request_tickets(configuration)
   tickets.each do |ticket|
     # Example of adding a comment to the ticket
     if ticket[:errors].length.positive?
-      # Add a comment
-      comment_url = "#{configuration[:jira_endpoint]}/rest/api/2/issue/#{ticket[:id]}/comment"
-      request = HTTP.basic_auth(configuration[:challenge]).post(
-        comment_url,
-        json: {
-          body: "[~#{ticket[:reporter]}] Please note, error found with the following resources: #{ticket[:errors].join(', ')}"
-        }
-      )
-      # @TODO: Check the response to see if the post was successful
-      # Assign issue to reporter
-      assign_url = "#{configuration[:jira_endpoint]}/rest/api/2/issue/#{ticket[:id]}"
-      HTTP.basic_auth(configuration[:challenge]).put(
-        assign_url,
-        json: {
-          fields: {
-            assignee: {
-              name: ticket[:reporter]
-            }
-          }
-        }
-      )
+      puts 'error found'
+      # # Add a comment
+      # comment_url = "#{configuration[:jira_endpoint]}/rest/api/2/issue/#{ticket[:id]}/comment"
+      # request = HTTP.basic_auth(configuration[:challenge]).post(
+      #   comment_url,
+      #   json: {
+      #     body: "[~#{ticket[:reporter]}] Please note, error found with the following resources: #{ticket[:errors].join(', ')}"
+      #   }
+      # )
+      # # @TODO: Check the response to see if the post was successful
+      # # Assign issue to reporter
+      # assign_url = "#{configuration[:jira_endpoint]}/rest/api/2/issue/#{ticket[:id]}"
+      # HTTP.basic_auth(configuration[:challenge]).put(
+      #   assign_url,
+      #   json: {
+      #     fields: {
+      #       assignee: {
+      #         name: ticket[:reporter]
+      #       }
+      #     }
+      #   }
+      # )
       # @TODO: Check the response to see if the post was successful
       next
     end
+    # https://docs.atlassian.com/software/jira/docs/api/REST/8.7.0/#api/2/issue/{issueIdOrKey}/attachments-addAttachment
+    # api/2/issue/{issueIdOrKey}/attachments
+    attachment_url = "#{configuration[:jira_endpoint]}/rest/api/2/issue/#{ticket[:id]}/attachments"
+    puts string_to_file(ticket[:resources].to_json, 'resources.json')
+    HTTP
+      .headers('X-Atlassian-Token': 'no-check')
+      .basic_auth(configuration[:challenge]).post(
+        attachment_url,
+        form: {
+          file: HTTP::FormData::File.new(string_to_file(ticket[:resources].to_json, 'resources.json'))
+        }
+      )
   end
 
 end

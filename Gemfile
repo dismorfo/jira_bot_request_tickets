@@ -9,3 +9,5 @@ gem 'optimist', '~> 3.0'
 gem 'dotenv'
 # https://github.com/httprb/http
 gem 'http'
+# https://github.com/mime-types/ruby-mime-types
+gem 'mime-types', require: 'mime/types/full'
