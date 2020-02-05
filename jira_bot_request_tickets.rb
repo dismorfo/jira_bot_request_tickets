@@ -43,12 +43,15 @@ def infer_job_from_string(data)
   return { partner: job[0], collection: job[1], job: job[2] } if [3].include?(job.size)
 end
 
-def job_available?(job)
-  puts job
+def job_source_entity_available?(content_directory, job)
+  source_entity_directory = "#{content_directory}/#{job[:partner]}/#{job[:collection]}/wip/se"
+  return false unless Dir.exist?(source_entity_directory)
+
+  true
 end
 
 def request_tickets(configuration)
-  ticket = {}
+  tickets = []
   issues_url = "#{configuration[:jira_endpoint]}/rest/api/2/search?jql=assignee=currentuser()"
   request = JSON.parse(
     HTTP.basic_auth(configuration[:challenge]).get(issues_url)
@@ -60,6 +63,7 @@ def request_tickets(configuration)
     ticket = {
       id: details['key'],
       self: details['self'],
+      reporter: details['fields']['reporter']['key'],
       project: details['fields']['project']['key'],
       resources: [],
       attachments: [],
@@ -72,33 +76,30 @@ def request_tickets(configuration)
       content.to_s.each_line do |line|
         next if line.strip.empty?
 
-        job = infer_job_from_string(line.strip.split('/'))
-        ticket[:error].push(line) unless job.empty?
+        job = infer_job_from_string(line)
+        ticket[:errors].push(line) unless job.empty? || job_source_entity_available?(configuration[:content_directory], job)
 
-        ticket[:resources].push(
-          partner: partner,
-          collection: collection,
-          job: job
-        )
+        ticket[:resources].push(job) if job_source_entity_available?(configuration[:content_directory], job)
       end
     end
 
-    puts JSON.pretty_generate(ticket)
+    tickets.push(ticket)
   end
 
-  # https://docs.atlassian.com/software/jira/docs/api/REST/8.7.0/#api/2/issue-getIssue
-  #
-  # Get issue
-  # GET /rest/api/2/issue/{issueIdOrKey}
-  # Archive issue
-  # PUT /rest/api/2/issue/{issueIdOrKey}/assignee
-  # Add comment
-  # POST /rest/api/2/issue/{issueIdOrKey}/comment
-  #
-  # Get attachment
-  # GET /rest/api/2/attachment/{id}
+  tickets.each do |ticket|
+    # Example of adding a comment to the ticket
+    if ticket[:errors].length.positive?
+      comment_url = "#{configuration[:jira_endpoint]}/rest/api/2/issue/#{ticket[:id]}/comment"
+      request = HTTP.basic_auth(configuration[:challenge]).post(
+        comment_url,
+        json: {
+          body: "Error found with the following resources: #{ticket[:errors].join(', ')}"
+        }
+      )
+      puts request
+    end
+  end
 
-  # issues = "https://jira.nyu.edu/rest/api/2/search?jql=assignee=currentuser()"
 end
 
 # Application message to display as banner in
@@ -116,22 +117,37 @@ end
 
 # commented out will I test def "infer_job_from_string"
 # Init the run. We need to pass a configuration object with:
-# request_tickets(
-#   content_directory: ENV['ROOT_CONTENT_DIRECTORY'],
-#   tickets_directory: ENV['TICKETS_DIRECTORY'],
-#   jira_endpoint: ENV['JIRA_ENDPOINT'],
-#   challenge: {
-#     user: ENV['HTTP_CHALLENGE_USER'],
-#     pass: ENV['HTTP_CHALLENGE_PASS']
-#   }
-# )
+request_tickets(
+  content_directory: ENV['ROOT_CONTENT_DIRECTORY'],
+  tickets_directory: ENV['TICKETS_DIRECTORY'],
+  jira_endpoint: ENV['JIRA_ENDPOINT'],
+  challenge: {
+    user: ENV['HTTP_CHALLENGE_USER'],
+    pass: ENV['HTTP_CHALLENGE_PASS']
+  }
+)
 
-puts infer_job_from_string('tamwag') # nil
-puts infer_job_from_string('tamwag/rosie')
-puts infer_job_from_string('tamwag/rosie/2_ESTHER_HORNE')
-puts infer_job_from_string('tamwag/rosie/2_ESTHER_HORNE/2_ESTHER_HORNE') # nil
+# puts infer_job_from_string('tamwag') # nil
+# puts infer_job_from_string('tamwag/rosie')
+# puts infer_job_from_string('tamwag/rosie/2_ESTHER_HORNE')
+# puts infer_job_from_string('tamwag/rosie/2_ESTHER_HORNE/2_ESTHER_HORNE') # nil
+# puts job_source_entity_available?(ENV['ROOT_CONTENT_DIRECTORY'], infer_job_from_string('tamwag/rosie'))
 
 # rubocop:enable Metrics/BlockLength
 # rubocop:enable Metrics/MethodLength
 # rubocop:enable Metrics/AbcSize
 # rubocop:enable Layout/LineLength
+
+  # https://docs.atlassian.com/software/jira/docs/api/REST/8.7.0/#api/2/issue-getIssue
+  #
+  # Get issue
+  # GET /rest/api/2/issue/{issueIdOrKey}
+  # Archive issue
+  # PUT /rest/api/2/issue/{issueIdOrKey}/assignee
+  # Add comment
+  # POST /rest/api/2/issue/{issueIdOrKey}/comment
+  #
+  # Get attachment
+  # GET /rest/api/2/attachment/{id}
+
+  # issues = "https://jira.nyu.edu/rest/api/2/search?jql=assignee=currentuser()"
