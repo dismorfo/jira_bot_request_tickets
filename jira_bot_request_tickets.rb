@@ -89,14 +89,29 @@ def request_tickets(configuration)
   tickets.each do |ticket|
     # Example of adding a comment to the ticket
     if ticket[:errors].length.positive?
+      # Add a comment
       comment_url = "#{configuration[:jira_endpoint]}/rest/api/2/issue/#{ticket[:id]}/comment"
       request = HTTP.basic_auth(configuration[:challenge]).post(
         comment_url,
         json: {
-          body: "Error found with the following resources: #{ticket[:errors].join(', ')}"
+          body: "[~#{ticket[:reporter]}] Please note, error found with the following resources: #{ticket[:errors].join(', ')}"
         }
       )
-      puts request
+      # @TODO: Check the response to see if the post was successful
+      # Assign issue to reporter
+      assign_url = "#{configuration[:jira_endpoint]}/rest/api/2/issue/#{ticket[:id]}"
+      HTTP.basic_auth(configuration[:challenge]).put(
+        assign_url,
+        json: {
+          fields: {
+            assignee: {
+              name: ticket[:reporter]
+            }
+          }
+        }
+      )
+      # @TODO: Check the response to see if the post was successful
+      next
     end
   end
 
@@ -133,11 +148,6 @@ request_tickets(
 # puts infer_job_from_string('tamwag/rosie/2_ESTHER_HORNE/2_ESTHER_HORNE') # nil
 # puts job_source_entity_available?(ENV['ROOT_CONTENT_DIRECTORY'], infer_job_from_string('tamwag/rosie'))
 
-# rubocop:enable Metrics/BlockLength
-# rubocop:enable Metrics/MethodLength
-# rubocop:enable Metrics/AbcSize
-# rubocop:enable Layout/LineLength
-
   # https://docs.atlassian.com/software/jira/docs/api/REST/8.7.0/#api/2/issue-getIssue
   #
   # Get issue
@@ -151,3 +161,8 @@ request_tickets(
   # GET /rest/api/2/attachment/{id}
 
   # issues = "https://jira.nyu.edu/rest/api/2/search?jql=assignee=currentuser()"
+
+# rubocop:enable Metrics/BlockLength
+# rubocop:enable Metrics/MethodLength
+# rubocop:enable Metrics/AbcSize
+# rubocop:enable Layout/LineLength
